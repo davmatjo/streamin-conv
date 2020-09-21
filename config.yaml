@@ -1,0 +1,7 @@
+
+port: 8080
+
+dirs:
+  unprocessed: ./in
+  processed: ./out
+

@@ -1,0 +1,10 @@
+/target
+
+*.mp4
+*.mkv
+*.mpd
+*.m4s
+
+.idea/
+in/
+out/
