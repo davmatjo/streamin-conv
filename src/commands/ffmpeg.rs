@@ -15,6 +15,7 @@ pub struct Config {
     file: PathBuf,
     out_file: Option<PathBuf>,
     tracks: Vec<isize>,
+    can_fail: bool,
 }
 
 pub struct CodecOpts {
@@ -185,6 +186,10 @@ impl MediaCommandConfig for Config {
 
         Ok(())
     }
+
+    fn can_fail(&self) -> bool {
+        self.can_fail
+    }
 }
 
 #[allow(dead_code)]
@@ -218,6 +223,7 @@ impl Config {
                 channels: -1,
                 colour_8_bit: false,
             },
+            can_fail: false,
         }
     }
 
@@ -286,6 +292,11 @@ impl Config {
 
     pub fn colour_8_bit(&mut self) -> &mut Self {
         self.video.colour_8_bit = true;
+        self
+    }
+
+    pub fn can_fail(&mut self) -> &mut Self {
+        self.can_fail = true;
         self
     }
 }

@@ -33,7 +33,8 @@ pub(crate) fn exec_dash_conv(state: Data<Sessions>, file: PathBuf) -> String {
             .audio_channels(2)
             .audio_encoder(AAC)
             .audio_bitrate(256_000)
-            .tracks(once(s.index));
+            .tracks(once(s.index))
+            .can_fail();
         aud
     }).collect();
 
@@ -42,13 +43,16 @@ pub(crate) fn exec_dash_conv(state: Data<Sessions>, file: PathBuf) -> String {
         sub.video_disabled()
             .audio_disabled()
             .subtitle_encoder(WEB_VTT)
-            .tracks(once(s.index));
+            .tracks(once(s.index))
+            .can_fail();
         sub
     }).collect();
 
     let vid_frag = mp4fragment::Config::new(temp_new_file_end(file.as_path(), "-split-vid-0.mp4"));
     let audio_frags: Vec<_> = info.raw.streams.iter().filter(|s| s.codec_type == "audio").map(|s| {
-        mp4fragment::Config::new(temp_new_file_end(file.as_path(), &*format!("-split-aud-{}.mp4", s.index)))
+        let mut c = mp4fragment::Config::new(temp_new_file_end(file.as_path(), &*format!("-split-aud-{}.mp4", s.index)));
+        c.can_fail();
+        c
     }).collect();
 
     let dash = mp4dash::Config::new(
@@ -63,7 +67,7 @@ pub(crate) fn exec_dash_conv(state: Data<Sessions>, file: PathBuf) -> String {
     );
 
     let info = Arc::new(RwLock::new(info));
-    let mut session = Session::new(Box::new(vid), info);
+    let mut session = Session::new(id, Box::new(vid), info);
     for a in audios {
         session.chain(a);
     }

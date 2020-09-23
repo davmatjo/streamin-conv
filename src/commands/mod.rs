@@ -1,15 +1,17 @@
 use std::collections::VecDeque;
 use std::error::Error;
 use std::path::Path;
-use std::process::Stdio;
+use std::process::{ExitStatus, Stdio};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use derive_more::{Display, Error};
-use log::error;
+use log::{debug, error, info, trace};
 use serde::Serialize;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
+use tokio::task::JoinError;
+use uuid::Uuid;
 
 use crate::commands::ffprobe::FFProbeResponse;
 use crate::commands::SessionError::AlreadyStarted;
@@ -30,15 +32,17 @@ pub enum SessionError {
 pub trait MediaCommandConfig {
     fn build(&self) -> Result<Command, Box<dyn Error>>;
     fn validate(&self) -> Result<(), SessionError>;
+    fn can_fail(&self) -> bool;
 }
 
 pub struct Session {
+    id: Uuid,
     media_info: Arc<RwLock<MediaInfo>>,
     session_info: Arc<RwLock<SessionInfoInt>>,
     commands: Vec<Box<dyn MediaCommandConfig + Send + Sync>>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SessionInfoInt {
     frame: usize,
     fps: f64,
@@ -49,13 +53,17 @@ pub struct SessionInfoInt {
     stderr: Vec<String>,
     stage: usize,
     max_stages: usize,
+    failed: bool,
 }
 
 #[derive(Serialize, Debug)]
 pub struct SessionInfo {
+    id: String,
+    file_name: String,
     percent_complete: f64,
     stage: usize,
     max_stages: usize,
+    failed: bool,
     detail: Option<SessionDetail>,
     logs: SessionLog,
 }
@@ -77,7 +85,7 @@ pub struct SessionDetail {
 }
 
 impl Session {
-    pub fn new(cmd: Box<dyn MediaCommandConfig + Send + Sync>, info: Arc<RwLock<MediaInfo>>) -> Self
+    pub fn new(id: Uuid, cmd: Box<dyn MediaCommandConfig + Send + Sync>, info: Arc<RwLock<MediaInfo>>) -> Self
     {
         let session = Arc::new(RwLock::new(SessionInfoInt {
             frame: 0,
@@ -89,9 +97,11 @@ impl Session {
             stderr: Vec::new(),
             stage: 0,
             max_stages: 1,
+            failed: false,
         }));
 
         Session {
+            id,
             media_info: info,
             session_info: session,
             commands: vec![cmd],
@@ -123,9 +133,14 @@ impl Session {
         };
 
         SessionInfo {
+            id: self.id.to_string(),
+            file_name: media_info.file_title.clone(),
+
             percent_complete: overall_percent,
             stage: session_info.stage,
             max_stages: session_info.max_stages,
+
+            failed: session_info.failed,
 
             logs: SessionLog {
                 stdout: session_info.stdout.clone(),
@@ -149,17 +164,26 @@ impl Session {
         self.session_info.write().unwrap().max_stages = self.commands.len();
 
         let cmds = std::mem::replace(&mut self.commands, vec![]);
-        let cmds: Vec<Command> = cmds.iter().map(|c| c.build()).collect::<Result<_, _>>()?;
+        let cmds = cmds.iter().map(|c| {
+            let cmd = c.build()?;
+            Ok((cmd, c.can_fail()))
+        }).collect::<Result<Vec<_>, Box<dyn Error>>>()?;
 
         let status = self.session_info.clone();
         let max_time = self.media_info.read().unwrap().duration.clone();
 
+        let inner_info = self.session_info.clone();
+
         tokio::spawn(async move {
             let status = status;
-            for cmd in cmds {
+            for (cmd, can_fail) in cmds {
                 println!("Spawning cmd: {:?}", cmd);
                 status.write().unwrap().stage += 1;
-                Self::spawn(cmd, status.clone()).await;
+                let status = Self::spawn(cmd, status.clone()).await.unwrap();
+                if !status.success() && !can_fail {
+                    inner_info.write().unwrap().failed = true;
+                    return;
+                }
             }
             // Manually max out the time to ensure we're at 100%
             status.write().unwrap().time = max_time;
@@ -167,7 +191,7 @@ impl Session {
         Ok(())
     }
 
-    async fn spawn(mut cmd: Command, status: Arc<RwLock<SessionInfoInt>>) {
+    async fn spawn(mut cmd: Command, status: Arc<RwLock<SessionInfoInt>>) -> Result<ExitStatus, JoinError> {
         cmd.stdout(Stdio::piped())
             .stdin(Stdio::null())
             .stderr(Stdio::piped());
@@ -193,6 +217,7 @@ impl Session {
                 stderr: vec![],
                 stage: 0,
                 max_stages: 0,
+                failed: false,
             };
             let mut line_buf = VecDeque::new();
             let mut ctr = 0;
@@ -207,10 +232,15 @@ impl Session {
             }
 
             while let Some(line) = reader.next_line().await.unwrap() {
+                trace!("Line: {}", line);
                 match line.split('=').collect::<Vec<_>>()[..] {
                     ["frame", x] => local_buf.frame = x.parse().unwrap_or(local_buf.frame),
                     ["fps", x] => local_buf.fps = x.parse().unwrap_or(local_buf.fps),
-                    ["bitrate", x] => local_buf.bitrate = x[..x.len() - 7].trim().parse().unwrap_or(local_buf.bitrate),
+                    ["bitrate", x] => local_buf.bitrate = x.chars().take(floor_usize(x.len() as isize - 7))
+                        .collect::<String>()
+                        .trim()
+                        .parse()
+                        .unwrap_or(local_buf.bitrate),
                     ["total_size", x] => local_buf.total_size = x.trim().parse().unwrap_or(local_buf.total_size),
                     ["out_time_us", x] => local_buf.time = Duration::from_micros(x.parse().unwrap_or_else(|_| local_buf.time.as_micros() as u64)),
                     [_, _] => (),
@@ -223,6 +253,8 @@ impl Session {
 
                 // Limit updates to limit locks
                 if ctr > 24 {
+                    debug!("Local Buffer Write {:?}", local_buf);
+
                     let s = &mut *status_stdout.write().unwrap();
                     s.frame = local_buf.frame;
                     s.fps = local_buf.fps;
@@ -240,7 +272,7 @@ impl Session {
 
         tokio::spawn(async move {
             while let Some(line) = reader_err.next_line().await.unwrap() {
-                println!("{}", line);
+                debug!("{}", line);
                 let s = &mut *status.write().unwrap();
                 s.stderr.push(line);
             };
@@ -251,8 +283,9 @@ impl Session {
         tokio::spawn(async {
             let status = p.await
                 .expect("child process encountered an error");
-            println!("child status was: {}", status);
-        }).await;
+            info!("child status was: {}", status);
+            status
+        }).await
     }
 }
 
@@ -267,6 +300,14 @@ pub struct MediaInfo {
 
     #[serde(skip)]
     pub raw: FFProbeResponse,
+}
+
+fn floor_usize(n: isize) -> usize {
+    if n < 0 {
+        0
+    } else {
+        n as usize
+    }
 }
 
 impl MediaInfo {

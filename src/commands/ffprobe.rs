@@ -2,6 +2,7 @@ use std::error::Error;
 use std::path::Path;
 use std::process::Command;
 
+use log::debug;
 use serde::Deserialize;
 
 #[derive(Deserialize, Debug, Clone)]
@@ -40,6 +41,8 @@ pub fn get_info(file: &Path) -> Result<FFProbeResponse, Box<dyn Error>> {
         .arg("format=duration")
         .arg(file)
         .output()?;
+
+    debug!("{:?}", std::str::from_utf8(&out.stdout));
 
     let parsed: FFProbeResponse = serde_json::from_slice(&out.stdout)?;
     Ok(parsed)

@@ -67,6 +67,10 @@ impl MediaCommandConfig for Config {
     fn validate(&self) -> Result<(), SessionError> {
         Ok(())
     }
+
+    fn can_fail(&self) -> bool {
+        false
+    }
 }
 
 impl Config {

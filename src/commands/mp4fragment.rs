@@ -9,6 +9,7 @@ use crate::commands::SessionError::InvalidCommandConfig;
 pub struct Config {
     file: PathBuf,
     out_file: Option<PathBuf>,
+    can_fail: bool,
 }
 
 impl MediaCommandConfig for Config {
@@ -34,6 +35,10 @@ impl MediaCommandConfig for Config {
         }
         Ok(())
     }
+
+    fn can_fail(&self) -> bool {
+        self.can_fail
+    }
 }
 
 impl Config {
@@ -41,7 +46,13 @@ impl Config {
         Config {
             file,
             out_file: None,
+            can_fail: false,
         }
+    }
+
+    pub fn can_fail(&mut self) -> &mut Self {
+        self.can_fail = true;
+        self
     }
 
     #[allow(dead_code)]
