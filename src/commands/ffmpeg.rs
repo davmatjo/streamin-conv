@@ -62,7 +62,7 @@ impl MediaCommandConfig for Config {
         let mut cmd = Command::new("ffmpeg");
         cmd.arg("-i")
             .arg(&self.file)
-            // .arg("-y")
+            .arg("-y")
             // .arg("-v")
             // .arg("quiet")
             .arg("-progress")
