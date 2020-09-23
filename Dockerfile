@@ -3,7 +3,7 @@ FROM rustlang/rust:nightly-alpine AS builder
 RUN apk add musl-dev
 
 COPY . .
-RUN cargo build
+RUN cargo build --release
 
 # Final image
 FROM alfg/bento4:ffmpeg
