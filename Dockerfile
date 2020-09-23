@@ -14,7 +14,7 @@ ENV PATH=/opt/ffmpeg/bin:$PATH
 RUN mkdir /app
 WORKDIR /app
 # copy the binary into the final image
-COPY --from=builder /target/debug/streamin-conv .
+COPY --from=builder /target/release/streamin-conv .
 
 # set the binary as entrypoint
 ENTRYPOINT ["/app/streamin-conv"]
