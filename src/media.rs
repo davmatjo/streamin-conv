@@ -121,13 +121,14 @@ pub async fn processed() -> Result<HttpResponse, actix_web::Error> {
 fn get_media_infos(dir: &Path) -> Vec<MediaInfo> {
     // Splits the files into a parallel iterator and runs ffprobe on each media file, ignoring any invalid files
     // This will not panic unless directories are deleted during execution
-    std::fs::read_dir(dir).unwrap().par_bridge().filter_map(|entry| {
-        debug!("{:?}", entry);
-        entry.ok().and_then(|e| {
-            commands::MediaInfo::get(e.path().as_path()).map_err(|e| {
-                error!("{}", e);
-                e
-            }).ok()
-        })
-    }).collect()
+    walkdir::WalkDir::new(dir).into_iter().par_bridge()
+        .filter_map(|entry| {
+            debug!("{:?}", entry);
+            entry.ok().and_then(|e| {
+                commands::MediaInfo::get(e.path()).map_err(|e| {
+                    error!("{}", e);
+                    e
+                }).ok()
+            })
+        }).collect()
 }
