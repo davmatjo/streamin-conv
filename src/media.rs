@@ -1,5 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
+use std::fs::DirEntry;
+use std::io;
 use std::path::Path;
 use std::sync::RwLock;
 
@@ -110,25 +112,31 @@ struct ProcessedMedia {
 #[get("/api/conv/processed")]
 pub async fn processed() -> Result<HttpResponse, actix_web::Error> {
     Ok(HttpResponse::Ok().json(Items {
-        items: std::fs::read_dir(*PROCESSED_DIR)?
-            .filter_map(|f| f.ok())
-            .filter_map(|f| f.path().is_dir().then_some(f.file_name()))
+        items: processed_files()?
+            .map(|f| f.file_name())
             .map(|f| ProcessedMedia { file_name: f.to_str().unwrap().to_string() })
             .collect()
     }))
 }
 
 fn get_media_infos(dir: &Path) -> Vec<MediaInfo> {
+    let dirs: HashSet<_> = processed_files().map(|i| i.map(|f| f.path()).collect()).unwrap_or_default();
     // Splits the files into a parallel iterator and runs ffprobe on each media file, ignoring any invalid files
     // This will not panic unless directories are deleted during execution
     walkdir::WalkDir::new(dir).into_iter().par_bridge()
+        .filter_map(|e| e.ok())
+        .filter(|e| !dirs.contains(e.path()))
         .filter_map(|entry| {
             debug!("{:?}", entry);
-            entry.ok().and_then(|e| {
-                commands::MediaInfo::get(e.path()).map_err(|e| {
-                    error!("{}", e);
-                    e
-                }).ok()
-            })
+            commands::MediaInfo::get(entry.path()).map_err(|e| {
+                error!("{}", e);
+                e
+            }).ok()
         }).collect()
+}
+
+fn processed_files() -> Result<impl Iterator<Item=DirEntry>, io::Error> {
+    Ok(std::fs::read_dir(*PROCESSED_DIR)?
+        .filter_map(|f| f.ok())
+        .filter(|f| f.path().is_dir()))
 }
