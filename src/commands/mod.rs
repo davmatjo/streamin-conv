@@ -322,7 +322,7 @@ impl MediaInfo {
                 id: base64::encode_config(file.to_str().unwrap(), base64::URL_SAFE_NO_PAD),
                 video_codec: v.and_then(|v| v.codec_name.clone().into()),
                 audio_codec: a.and_then(|a| a.codec_name.clone().into()),
-                meta_title: v.and_then(|v| v.tags.title.clone()),
+                meta_title: v.and_then(|v| v.tags.as_ref().and_then(|v| v.title.clone())),
                 file_title: file.file_name().unwrap().to_str().unwrap().to_string(),
                 duration: Duration::from_secs_f64(meta.format.duration.parse().unwrap()),
                 raw: meta,

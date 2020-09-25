@@ -21,7 +21,7 @@ pub struct Stream {
     pub index: isize,
     pub codec_name: String,
     pub codec_type: String,
-    pub tags: Tags,
+    pub tags: Option<Tags>,
 }
 
 #[derive(Deserialize, Debug, Clone)]

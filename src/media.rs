@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
-use std::ffi::OsString;
 use std::fs::DirEntry;
 use std::io;
 use std::path::Path;
