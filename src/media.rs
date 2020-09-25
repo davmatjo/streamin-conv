@@ -127,6 +127,8 @@ fn get_media_infos(dir: &Path) -> Vec<MediaInfo> {
             f.path()
                 .file_stem()
                 .unwrap()
+                .to_str()
+                .unwrap()
                 .to_owned()
         ).collect()
     ).unwrap_or_default();
@@ -134,11 +136,18 @@ fn get_media_infos(dir: &Path) -> Vec<MediaInfo> {
     // This will not panic unless directories are deleted during execution
     walkdir::WalkDir::new(dir).into_iter().par_bridge()
         .filter_map(|e| e.ok())
-        .filter(|e| !processed_files.contains(e.path().file_stem().unwrap()))
-        .filter_map(|entry| {
+        .filter(|e| !processed_files.contains(e.path()
+            .file_stem()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .split('-')
+            .next()
+            .unwrap()
+        )).filter_map(|entry| {
             debug!("{:?}", entry);
             commands::MediaInfo::get(entry.path()).map_err(|e| {
-                error!("{}", e);
+                error!("Error getting media for {:?}: {}", entry, e);
                 e
             }).ok()
         }).collect()
