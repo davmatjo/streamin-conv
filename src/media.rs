@@ -114,18 +114,27 @@ struct ProcessedMedia {
 pub async fn processed() -> Result<HttpResponse, actix_web::Error> {
     Ok(HttpResponse::Ok().json(Items {
         items: processed_files()?
+            .map(|f| f.file_name())
             .map(|f| ProcessedMedia { file_name: f.to_str().unwrap().to_string() })
             .collect()
     }))
 }
 
 fn get_media_infos(dir: &Path) -> Vec<MediaInfo> {
-    let dirs: HashSet<_> = processed_files().map(|f| f.collect()).unwrap_or_default();
+    // Get the names of all the processed files
+    let processed_files: HashSet<_> = processed_files().map(|f|
+        f.map(|f|
+            f.path()
+                .file_stem()
+                .unwrap()
+                .to_owned()
+        ).collect()
+    ).unwrap_or_default();
     // Splits the files into a parallel iterator and runs ffprobe on each media file, ignoring any invalid files
     // This will not panic unless directories are deleted during execution
     walkdir::WalkDir::new(dir).into_iter().par_bridge()
         .filter_map(|e| e.ok())
-        .filter(|e| !dirs.contains(e.file_name()))
+        .filter(|e| !processed_files.contains(e.path().file_stem().unwrap()))
         .filter_map(|entry| {
             debug!("{:?}", entry);
             commands::MediaInfo::get(entry.path()).map_err(|e| {
@@ -135,9 +144,8 @@ fn get_media_infos(dir: &Path) -> Vec<MediaInfo> {
         }).collect()
 }
 
-fn processed_files() -> Result<impl Iterator<Item=OsString>, io::Error> {
+fn processed_files() -> Result<impl Iterator<Item=DirEntry>, io::Error> {
     Ok(std::fs::read_dir(*PROCESSED_DIR)?
         .filter_map(|f| f.ok())
-        .filter(|f| f.path().is_dir())
-        .map(|f| f.file_name()))
+        .filter(|f| f.path().is_dir()))
 }
